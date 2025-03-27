@@ -48,18 +48,18 @@ class Attention(nn.Module):
         ) if project_out else nn.Identity()
 
     def forward(self, x):
-        x = self.norm(x)
+        x = self.norm(x) #torch.Size([1, 65, 1024])
 
-        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        qkv = self.to_qkv(x).chunk(3, dim = -1) # qkv: 3*torch.Size([1, 65, 1024])
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale #dots: torch.Size([1, 16, 65, 65]) q: torch.Size([1, 16, 65, 64])
 
         attn = self.attend(dots)
         attn = self.dropout(attn)
 
-        out = torch.matmul(attn, v)
-        out = rearrange(out, 'b h n d -> b n (h d)')
+        out = torch.matmul(attn, v) #out:torch.Size([1, 16, 65, 64])
+        out = rearrange(out, 'b h n d -> b n (h d)')#out:torch.Size([1, 65, 1024])
         return self.to_out(out)
 
 class Transformer(nn.Module):
@@ -92,14 +92,14 @@ class ViT(nn.Module):
         patch_dim = channels * patch_height * patch_width
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
 
-        self.to_patch_embedding = nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_height, p2 = patch_width),
+        self.to_patch_embedding = nn.Sequential(  
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = patch_height, p2 = patch_width),#torch.Size([1, 3, 256, 256]) -> torch.Size([1, (256/patch_height)*(256/patch_width), patch_height*patch_width*3])
             nn.LayerNorm(patch_dim),
             nn.Linear(patch_dim, dim),
             nn.LayerNorm(dim),
         )
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim)) #torch.Size([1, 65, 1024])
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
@@ -112,16 +112,16 @@ class ViT(nn.Module):
 
     def forward(self, img):
         x = self.to_patch_embedding(img)
-        b, n, _ = x.shape
+        b, n, _ = x.shape #x: torch.Size([1, 64, 1024]) [B, patch数量，维度]
 
-        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
-        x = torch.cat((cls_tokens, x), dim=1)
-        x += self.pos_embedding[:, :(n + 1)]
+        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b) #cls_tokens: torch.Size([b, 1, 1024]) b = 1 
+        x = torch.cat((cls_tokens, x), dim=1) #torch.Size([1, 65, 1024])
+        x += self.pos_embedding[:, :(n + 1)] #为什么pos_embedding是加，而cls_token是cat? https://www.zhihu.com/question/485476372
         x = self.dropout(x)
 
-        x = self.transformer(x)
+        x = self.transformer(x) #x: torch.Size([1, 65, 1024]) transfomer encoder
 
-        x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
+        x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0] #torch.Size([1, 1024]) 取第二维中的第一个元素，即cls token,我理解这个向量经过self-attention之后学习到了整个图片的信息，所以取这个向量作为整个图片的特征向量，然后通过一个全连接层输出类别
 
         x = self.to_latent(x)
         return self.mlp_head(x)
